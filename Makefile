@@ -1,4 +1,4 @@
-SOURCES = main.go service.go
+SOURCES = main.go service.go websocket.go
 OUT = muter.exe
 
 run:

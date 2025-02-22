@@ -8,4 +8,7 @@ require (
 	github.com/moutend/go-wca v0.3.0
 )
 
-require golang.org/x/sys v0.1.0 // indirect
+require (
+	github.com/gorilla/websocket v1.5.3 // indirect
+	golang.org/x/sys v0.1.0 // indirect
+)
