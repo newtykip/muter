@@ -9,24 +9,17 @@ import (
 
 var upgrader = websocket.Upgrader{}
 
-func handleWebsocket(w http.ResponseWriter, r *http.Request, logger service.Logger) {
+func handleWebsocket(w http.ResponseWriter, r *http.Request, state chan bool, logger service.Logger) {
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.Error("upgrade:", err)
 		return
 	}
 	defer c.Close()
-	for {
-		mt, message, err := c.ReadMessage()
-		if err != nil {
-			logger.Error("read:", err)
-			break
-		}
-		logger.Infof("recv: %s", message)
-		err = c.WriteMessage(mt, message)
-		if err != nil {
+	for muted := range state {
+		if err := c.WriteJSON(muted); err != nil {
 			logger.Error("write:", err)
-			break
+			return
 		}
 	}
 }

@@ -13,7 +13,7 @@ import (
 
 const (
 	Port     = 3034
-	PollRate = 500 * time.Second
+	PollRate = 500 * time.Millisecond
 )
 
 var mute bool
@@ -35,19 +35,21 @@ func (m *muter) Stop(_ service.Service) error {
 	return nil
 }
 
-func trackMute(aev *wca.IAudioEndpointVolume, logger service.Logger) {
+func trackMute(aev *wca.IAudioEndpointVolume, state chan bool, logger service.Logger) {
 	ticker := time.NewTicker(PollRate)
 	for range ticker.C {
 		// get current mute state
 		var currentMute bool
 		if err := aev.GetMute(&currentMute); err != nil {
 			logger.Error(err)
+			continue
 		}
 
-		// if mute state has changed, update and broadcast
+		// if mute state has changed, update
 		if currentMute != mute {
 			mute = currentMute
-			logger.Infof("Mute state changed to %v", mute)
+			state <- currentMute
+			logger.Infof("Mute state changed to %v", currentMute)
 		}
 	}
 }
@@ -82,11 +84,12 @@ func (m *muter) run() {
 	defer aev.Release()
 
 	// track current mute state
-	go trackMute(aev, m.logger)
+	stateChan := make(chan bool)
+	go trackMute(aev, stateChan, m.logger)
 
 	// start websocket server
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		handleWebsocket(w, r, m.logger)
+		handleWebsocket(w, r, stateChan, m.logger)
 	})
 	http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", Port), nil)
 }
