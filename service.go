@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-ole/go-ole"
@@ -16,7 +17,30 @@ const (
 	PollRate = 500 * time.Millisecond
 )
 
-var mute bool
+type muteState struct {
+	sync.Mutex
+	muted       bool
+	subscribers map[chan bool]struct{}
+}
+
+func (s *muteState) subscribe() chan bool {
+	s.Lock()
+	defer s.Unlock()
+	c := make(chan bool, 1)
+	s.subscribers[c] = struct{}{}
+	return c
+}
+
+func (s *muteState) unsubscribe(c chan bool) {
+	s.Lock()
+	defer s.Unlock()
+	delete(s.subscribers, c)
+	close(c)
+}
+
+var state = muteState{
+	subscribers: make(map[chan bool]struct{}),
+}
 
 func (m *muter) Start(_ service.Service) error {
 	if service.Interactive() {
@@ -35,22 +59,26 @@ func (m *muter) Stop(_ service.Service) error {
 	return nil
 }
 
-func trackMute(aev *wca.IAudioEndpointVolume, state chan bool, logger service.Logger) {
+func trackMute(aev *wca.IAudioEndpointVolume, logger service.Logger) {
 	ticker := time.NewTicker(PollRate)
+	defer ticker.Stop()
 	for range ticker.C {
-		// get current mute state
-		var currentMute bool
-		if err := aev.GetMute(&currentMute); err != nil {
-			logger.Error(err)
+		var muted bool
+		if err := aev.GetMute(&muted); err != nil {
+			logger.Errorf("GetMute: %v", err)
 			continue
 		}
-
-		// if mute state has changed, update
-		if currentMute != mute {
-			mute = currentMute
-			state <- currentMute
-			logger.Infof("Mute state changed to %v", currentMute)
+		state.Lock()
+		if muted != state.muted {
+			state.muted = muted
+			for c := range state.subscribers {
+				select {
+				case c <- muted:
+				default:
+				}
+			}
 		}
+		state.Unlock()
 	}
 }
 
@@ -84,12 +112,16 @@ func (m *muter) run() {
 	defer aev.Release()
 
 	// track current mute state
-	stateChan := make(chan bool)
-	go trackMute(aev, stateChan, m.logger)
+	go trackMute(aev, m.logger)
 
 	// start websocket server
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		handleWebsocket(w, r, stateChan, m.logger)
+		handleWebsocket(w, r, aev, m.logger)
 	})
-	http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", Port), nil)
+	go func() {
+		if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", Port), nil); err != nil {
+			m.logger.Errorf("HTTP server error: %v", err)
+		}
+	}()
+	select {}
 }
