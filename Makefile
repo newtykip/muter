@@ -10,3 +10,6 @@ clean:
 build: clean
 	go build -ldflags="-s -w" -o $(OUT) $(SOURCES)
 	upx --best --lzma $(OUT)
+
+installer: build
+	makensis installer.nsi

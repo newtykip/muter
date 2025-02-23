@@ -1,6 +1,6 @@
 @echo off
 setlocal
-set SERVICE_NAME=muter
+set SERVICE_NAME=dev.newty.muter
 
 rem Stop and delete the service
 sc stop "%SERVICE_NAME%"
